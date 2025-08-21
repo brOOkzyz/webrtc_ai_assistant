@@ -1,0 +1,34 @@
+# WebRTC语音助手系统包文件清单
+
+# 包含所有Python文件
+include *.py
+recursive-include webrtc_voice_assistant *.py
+
+# 包含文档
+include README.md
+include *.md
+include *.txt
+
+# 包含配置文件
+include requirements.txt
+include setup.py
+include MANIFEST.in
+
+# 包含客户端文件
+include webrtc_client.html
+
+# 包含启动脚本
+include *.sh
+include *.bat
+
+# 包含许可证
+include LICENSE
+
+# 排除不需要的文件
+exclude *.pyc
+exclude __pycache__
+exclude .DS_Store
+exclude *.log
+exclude .git*
+exclude .vscode
+exclude .idea
