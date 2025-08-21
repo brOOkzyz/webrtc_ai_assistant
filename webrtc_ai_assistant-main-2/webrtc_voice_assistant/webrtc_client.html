@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC语音助手</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            text-align: center;
+        }
+        .connected { background-color: #d4edda; color: #155724; }
+        .disconnected { background-color: #f8d7da; color: #721c24; }
+        .controls {
+            margin: 20px 0;
+            text-align: center;
+        }
+        button {
+            padding: 12px 24px;
+            margin: 5px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        .connect { background-color: #007bff; color: white; }
+        .disconnect { background-color: #dc3545; color: white; }
+        .record { background-color: #28a745; color: white; }
+        .stop { background-color: #ffc107; color: black; }
+        button:disabled { opacity: 0.6; cursor: not-allowed; }
+        .log {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 15px;
+            margin-top: 20px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .log-entry {
+            margin: 5px 0;
+            padding: 5px;
+            border-bottom: 1px solid #eee;
+        }
+        .error { color: #dc3545; }
+        .success { color: #28a745; }
+        .info { color: #007bff; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>WebRTC语音助手</h1>
+        
+        <div id="status" class="status disconnected">
+            未连接
+        </div>
+        
+        <div class="controls">
+            <button id="connectBtn" class="connect" onclick="connect()">连接服务器</button>
+            <button id="disconnectBtn" class="disconnect" onclick="disconnect()" disabled>断开连接</button>
+            <button id="recordBtn" class="record" onclick="startRecording()" disabled>开始录音</button>
+            <button id="stopBtn" class="stop" onclick="stopRecording()" disabled>停止录音</button>
+        </div>
+        
+        <div class="log" id="log"></div>
+    </div>
+
+    <script>
+        let websocket = null;
+        let mediaRecorder = null;
+        let audioChunks = [];
+        let isRecording = false;
+
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        function updateStatus(connected) {
+            const statusDiv = document.getElementById('status');
+            const connectBtn = document.getElementById('connectBtn');
+            const disconnectBtn = document.getElementById('disconnectBtn');
+            const recordBtn = document.getElementById('recordBtn');
+            
+            if (connected) {
+                statusDiv.textContent = '已连接';
+                statusDiv.className = 'status connected';
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+                recordBtn.disabled = false;
+            } else {
+                statusDiv.textContent = '未连接';
+                statusDiv.className = 'status disconnected';
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+                recordBtn.disabled = true;
+            }
+        }
+
+        async function connect() {
+            try {
+                websocket = new WebSocket('ws://localhost:8765');
+                
+                websocket.onopen = function() {
+                    log('已连接到服务器', 'success');
+                    updateStatus(true);
+                };
+                
+                websocket.onmessage = function(event) {
+                    const data = JSON.parse(event.data);
+                    handleServerMessage(data);
+                };
+                
+                websocket.onclose = function() {
+                    log('连接已关闭', 'info');
+                    updateStatus(false);
+                    websocket = null;
+                };
+                
+                websocket.onerror = function(error) {
+                    log('连接错误: ' + error, 'error');
+                    updateStatus(false);
+                };
+                
+            } catch (error) {
+                log('连接失败: ' + error, 'error');
+            }
+        }
+
+        function disconnect() {
+            if (websocket) {
+                websocket.close();
+                websocket = null;
+            }
+            if (isRecording) {
+                stopRecording();
+            }
+            updateStatus(false);
+        }
+
+        async function startRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+                
+                mediaRecorder.ondataavailable = function(event) {
+                    if (event.data.size > 0) {
+                        audioChunks.push(event.data);
+                    }
+                };
+                
+                mediaRecorder.onstop = function() {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                    sendAudioData(audioBlob);
+                };
+                
+                mediaRecorder.start(100);
+                isRecording = true;
+                
+                document.getElementById('recordBtn').disabled = true;
+                document.getElementById('stopBtn').disabled = false;
+                
+                log('开始录音', 'info');
+                
+            } catch (error) {
+                log('启动录音失败: ' + error, 'error');
+            }
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && isRecording) {
+                mediaRecorder.stop();
+                isRecording = false;
+                
+                document.getElementById('recordBtn').disabled = false;
+                document.getElementById('stopBtn').disabled = true;
+                
+                log('停止录音', 'info');
+            }
+        }
+
+        function sendAudioData(audioBlob) {
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                const reader = new FileReader();
+                reader.onload = function() {
+                    const audioData = reader.result;
+                    const message = {
+                        type: 'audio',
+                        audio: audioData
+                    };
+                    websocket.send(JSON.stringify(message));
+                    log('发送音频数据', 'info');
+                };
+                reader.readAsDataURL(audioBlob);
+            }
+        }
+
+        function handleServerMessage(data) {
+            const type = data.type;
+            
+            if (type === 'asr_result') {
+                log('语音识别结果: ' + data.text, 'success');
+            } else if (type === 'tts_result') {
+                log('收到语音回复: ' + data.text, 'success');
+                playAudio(data.audio);
+            } else if (type === 'error') {
+                log('服务器错误: ' + data.error_message, 'error');
+            }
+        }
+
+        function playAudio(audioData) {
+            try {
+                const audio = new Audio(audioData);
+                audio.play();
+            } catch (error) {
+                log('播放音频失败: ' + error, 'error');
+            }
+        }
+    </script>
+</body>
+</html>
